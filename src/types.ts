@@ -44,3 +44,9 @@ export interface DayProgress {
   hourlyBlocks: HourlyBlock[];
   notes?: string;
 }
+
+export interface SellerShare {
+  name: string;
+  sharePct: number;
+}
+

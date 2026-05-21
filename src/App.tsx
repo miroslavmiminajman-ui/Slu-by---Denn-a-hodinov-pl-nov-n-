@@ -22,6 +22,7 @@ import {
   RotateCcw,
   Sparkles,
   Users,
+  User,
   Flame,
   LayoutGrid,
   Link,
@@ -32,7 +33,7 @@ import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
 
 // Shared Types
-import { CalculationResult, HourlyBlock, AppSettings, DayProgress } from "./types";
+import { CalculationResult, HourlyBlock, AppSettings, DayProgress, SellerShare } from "./types";
 
 // Util Functions
 import { getRemainingDaysInfo } from "./utils/dateUtils";
@@ -81,6 +82,13 @@ const App: React.FC = () => {
   const [sellerCount, setSellerCount] = useState<number>(() => {
     const saved = localStorage.getItem("sales_planner_seller_count");
     return saved ? parseInt(saved, 10) : 1;
+  });
+  const [sellers, setSellers] = useState<SellerShare[]>(() => {
+    const saved = localStorage.getItem("sales_planner_seller_shares");
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) { /* ignore */ }
+    }
+    return [];
   });
   const [settings, setSettings] = useState<AppSettings>(() => {
     const saved = localStorage.getItem("sales_planner_settings");
@@ -150,6 +158,24 @@ const App: React.FC = () => {
   }, [sellerCount]);
 
   useEffect(() => {
+    localStorage.setItem("sales_planner_seller_shares", JSON.stringify(sellers));
+  }, [sellers]);
+
+  // Sync sellers array length with sellerCount and set equal shares
+  useEffect(() => {
+    if (sellers.length !== sellerCount) {
+      const base = Math.floor(100 / sellerCount);
+      const remainder = 100 % sellerCount;
+      const newSellers = Array.from({ length: sellerCount }, (_, k) => {
+        const sharePct = base + (k < remainder ? 1 : 0);
+        const name = sellers[k]?.name || `Osoba ${k + 1}`;
+        return { name, sharePct };
+      });
+      setSellers(newSellers);
+    }
+  }, [sellerCount, sellers.length]);
+
+  useEffect(() => {
     localStorage.setItem("sales_planner_settings", JSON.stringify(settings));
   }, [settings]);
 
@@ -168,6 +194,21 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem("include_live_sales", includeLiveSales.toString());
   }, [includeLiveSales]);
+
+  // Automated shift blocks reset back to 0 when a new day is detected
+  useEffect(() => {
+    const todayDateStr = systemTime.toLocaleDateString("cs-CZ");
+    const lastActiveDate = localStorage.getItem("sales_planner_last_active_date");
+
+    if (lastActiveDate && lastActiveDate !== todayDateStr) {
+      // It's a new day! Reset blocks back to 0.
+      const resetBlocks = createDefaultBlocks(dailyGoal);
+      setBlocks(resetBlocks);
+    }
+    
+    // Always keep the stored date up-to-date
+    localStorage.setItem("sales_planner_last_active_date", todayDateStr);
+  }, [systemTime, dailyGoal]);
 
   // Clock Update Interval
   useEffect(() => {
@@ -654,9 +695,11 @@ const App: React.FC = () => {
               </div>
               <div className="text-center sm:text-left space-y-0.5">
                 <p className="text-sm md:text-base font-bold text-slate-800">{fileName || "Vyber aktuální Denní Hlášení (Excel)"}</p>
-                <p className="text-xs text-slate-400 font-medium">
-                  {fileName ? "Denní hlášení je úspěšně analyzováno v paměti aplikace" : "Záhlaví tabulky musí být na 5. řádku; sloupec BranchName / Plan / Asr"}
-                </p>
+                {fileName && (
+                  <p className="text-xs text-slate-400 font-medium">
+                    Denní hlášení je úspěšně analyzováno v paměti aplikace
+                  </p>
+                )}
               </div>
               {fileName && (
                 <button 
@@ -775,7 +818,7 @@ const App: React.FC = () => {
                       <div className="p-6 md:p-10 flex flex-col justify-between space-y-7">
                         <div className="space-y-6">
                           
-                          <div className="flex flex-col justify-between min-h-[175px] md:min-h-[190px] lg:min-h-[195px] space-y-4">
+                          <div className="flex flex-col justify-between min-h-[175px] md:min-h-[190px] lg:h-[215px] lg:min-h-[215px] space-y-4">
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-3">
                                 <Target className="w-8 h-8 text-blue-400 animate-pulse" />
@@ -835,48 +878,56 @@ const App: React.FC = () => {
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-4.5 border-t border-slate-800/80">
                             {/* PREDIKOVANÝ OBRAT */}
                             <div 
-                              className="bg-slate-950/35 border border-slate-800 hover:border-blue-500/50 rounded-2xl p-3.5 transition-all cursor-pointer group shadow-inner flex flex-col justify-between h-[110px]"
-                              onClick={() => {
-                                const val = prompt("Upravit Predikovaný obrat pobočky:", Math.round(filteredResult.revenueRR).toString());
-                                if (val !== null) {
-                                  const num = parseFloat(val.replace(/\s/g, "").replace(",", "."));
-                                  if (!isNaN(num)) handleUpdateOverride("revenueRR", num);
-                                }
-                              }}
+                              className="bg-slate-950/35 border border-slate-800 hover:border-blue-500/50 rounded-2xl p-3.5 transition-all group shadow-inner flex flex-col justify-between h-[110px]"
                             >
-                              <div className="flex items-center justify-between gap-1.5 text-[11px] font-black text-slate-400 uppercase tracking-widest mb-1 leading-none shrink-0">
-                                <span>Predikovaný obrat</span>
+                              <div className="flex items-center justify-between gap-1.5 text-[11px] font-black text-slate-400 uppercase tracking-widest mb-1 leading-none shrink-0 font-sans">
+                                <span className="select-none">Predikovaný obrat</span>
                                 <PencilLine className="w-4 h-4 text-blue-400 opacity-55 group-hover:opacity-100 transition-opacity" />
                               </div>
-                              <div className="font-mono font-black text-lg md:text-xl text-slate-100 leading-tight">
-                                {Math.round(filteredResult.revenueRR).toLocaleString("cs-CZ")} <span className="text-xs text-slate-500 font-bold">Kč</span>
+                              <div className="flex items-center">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="1000"
+                                  value={Math.round(filteredResult.revenueRR) || ""}
+                                  onChange={(e) => {
+                                    const num = parseFloat(e.target.value);
+                                    handleUpdateOverride("revenueRR", isNaN(num) ? 0 : num);
+                                  }}
+                                  className="w-full bg-transparent p-0 font-mono font-black text-lg md:text-xl text-slate-100 border-[1.5px] border-transparent hover:border-slate-850 focus:border-blue-500 rounded px-1.5 py-0.5 focus:ring-0 focus:outline-none leading-none -ml-1.5"
+                                />
+                                <span className="text-xs text-slate-500 font-bold ml-1 select-none shrink-0">Kč</span>
                               </div>
-                              <div className="text-[10px] text-slate-500 font-bold leading-none shrink-0">
+                              <div className="text-[10px] text-slate-500 font-bold leading-none shrink-0 select-none">
                                 Odhadovaný výsledek
                               </div>
                             </div>
 
                             {/* ASR SLUŽBY */}
                             <div 
-                              className="bg-slate-950/35 border border-slate-800 hover:border-emerald-500/50 rounded-2xl p-3.5 transition-all cursor-pointer group shadow-inner flex flex-col justify-between h-[110px]"
-                              onClick={() => {
-                                const val = prompt("Upravit ASR Služby (Historie):", Math.round(filteredResult.serviceAsistRevenue).toString());
-                                if (val !== null) {
-                                  const num = parseFloat(val.replace(/\s/g, "").replace(",", "."));
-                                  if (!isNaN(num)) handleUpdateOverride("serviceAsistRevenue", num);
-                                }
-                              }}
+                              className="bg-slate-950/35 border border-slate-800 hover:border-emerald-500/50 rounded-2xl p-3.5 transition-all group shadow-inner flex flex-col justify-between h-[110px]"
                               title={includeLiveSales && totalSalesToday > 0 ? `Zahrnuje dnes prodaných ${totalSalesToday.toLocaleString()} Kč z živé směny` : undefined}
                             >
-                              <div className="flex items-center justify-between gap-1.5 text-[11px] font-black text-slate-400 uppercase tracking-widest mb-1 leading-none shrink-0">
-                                <span className={includeLiveSales ? "text-emerald-400 font-bold" : ""}>ASR Služby ({includeLiveSales ? "LIVE" : "HIST"})</span>
+                              <div className="flex items-center justify-between gap-1.5 text-[11px] font-black text-slate-400 uppercase tracking-widest mb-1 leading-none shrink-0 font-sans">
+                                <span className={includeLiveSales ? "text-emerald-400 font-bold select-none" : "select-none"}>ASR Služby ({includeLiveSales ? "LIVE" : "HIST"})</span>
                                 <PencilLine className="w-4 h-4 text-emerald-400 opacity-55 group-hover:opacity-100 transition-opacity" />
                               </div>
-                              <div className="font-mono font-black text-lg md:text-xl text-emerald-400 leading-tight">
-                                {Math.round(filteredResult.activeServiceAsistRevenue).toLocaleString("cs-CZ")} <span className="text-xs text-emerald-600 font-bold">Kč</span>
+                              <div className="flex items-center">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="1000"
+                                  value={Math.round(filteredResult.serviceAsistRevenue) || ""}
+                                  onChange={(e) => {
+                                    const num = parseFloat(e.target.value);
+                                    handleUpdateOverride("serviceAsistRevenue", isNaN(num) ? 0 : num);
+                                  }}
+                                  className="w-full bg-transparent p-0 font-mono font-black text-lg md:text-xl text-emerald-400 border-[1.5px] border-transparent hover:border-slate-850 focus:border-emerald-500 rounded px-1.5 py-0.5 focus:ring-0 focus:outline-none leading-none -ml-1.5"
+                                />
+                                <span className="text-xs text-emerald-600 font-bold ml-1 select-none shrink-0">Kč</span>
                               </div>
-                              <div className="text-[10px] text-slate-500 font-bold leading-none shrink-0">
-                                {includeLiveSales ? "Zahrnuje živou směnu" : "Historická data měsíce"}
+                              <div className="text-[10px] text-slate-500 font-bold leading-none shrink-0 select-none">
+                                {includeLiveSales ? `Live: ${Math.round(filteredResult.activeServiceAsistRevenue).toLocaleString("cs-CZ")} Kč` : "Historická data měsíce"}
                               </div>
                             </div>
                           </div>
@@ -931,11 +982,17 @@ const App: React.FC = () => {
                       <div className="p-6 md:p-10 flex flex-col justify-between space-y-7">
                         <div className="space-y-6">
                           
-                          <div className="flex flex-col justify-between min-h-[175px] md:min-h-[190px] lg:min-h-[195px] space-y-4">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-3">
-                                <Flame className="w-8 h-8 text-orange-400 animate-pulse" />
-                                <h3 className="text-base md:text-lg font-black uppercase tracking-widest text-slate-200">Aktuální cíl</h3>
+                          <div className="flex flex-col justify-between min-h-[175px] md:min-h-[190px] lg:h-[215px] lg:min-h-[215px] space-y-4">
+                            <div className="flex items-center justify-between gap-2 flex-wrap sm:flex-nowrap">
+                              <div className="flex items-center gap-2.5 flex-wrap">
+                                <div className="flex items-center gap-2">
+                                  <Flame className="w-8 h-8 text-orange-400 animate-pulse" />
+                                  <h3 className="text-base md:text-lg font-black uppercase tracking-widest text-slate-200">Aktuální cíl</h3>
+                                </div>
+                                <div className="inline-flex items-center gap-1.5 h-7 text-[11px] font-black text-orange-400 bg-orange-400/10 px-3 py-0.5 rounded-xl border border-orange-400/20 uppercase tracking-wider shrink-0 select-none">
+                                  <Clock className="w-4 h-4 text-orange-400 animate-pulse" />
+                                  <span>{numRemainingHours}h zbývá</span>
+                                </div>
                               </div>
                               <button
                                 onClick={handleResetDay}
@@ -953,15 +1010,35 @@ const App: React.FC = () => {
                                 {nextTargetHourlySalesVal.toLocaleString("cs-CZ")} <span className="text-3xl md:text-4xl lg:text-5xl font-extrabold text-slate-400 tracking-normal">CZK/h</span>
                               </div>
                               
-                              <div className="mt-3 flex flex-wrap items-center gap-2">
-                                <div className="inline-flex items-center gap-1.5 h-7 text-[11px] font-black text-orange-400 bg-orange-400/10 px-3 py-0.5 rounded-xl border border-orange-400/20 uppercase tracking-wider">
-                                  <Clock className="w-4 h-4 text-orange-400 animate-pulse" />
-                                  <span>{numRemainingHours}h zbývá</span>
-                                </div>
-                                <div className="inline-flex items-center gap-1.5 h-7 text-[11px] font-black text-blue-400 bg-blue-500/10 px-3 py-0.5 rounded-xl border border-blue-500/20 uppercase tracking-wider">
-                                  <Users className="w-4 h-4 text-blue-400" />
-                                  <span>Na 1 os: <strong className="text-slate-100 font-mono">{Math.round(nextTargetHourlySalesVal / sellerCount).toLocaleString("cs-CZ")} Kč/h</strong></span>
-                                </div>
+                              <div className="mt-3">
+                                {sellerCount <= 1 ? (
+                                  <div className="inline-flex items-center gap-1.5 h-7 text-[11px] font-black text-blue-400 bg-blue-500/10 px-3 py-0.5 rounded-xl border border-blue-500/20 uppercase tracking-wider">
+                                    <Users className="w-4 h-4 text-blue-400" />
+                                    <span>Na 1 os: <strong className="text-slate-100 font-mono">{Math.round(nextTargetHourlySalesVal / sellerCount).toLocaleString("cs-CZ")} Kč/h</strong></span>
+                                  </div>
+                                ) : (
+                                  <div className="flex flex-wrap gap-1.5 w-full">
+                                    {sellers.slice(0, sellerCount).map((seller, idx) => {
+                                      const targetVal = Math.round((nextTargetHourlySalesVal * seller.sharePct) / 100);
+                                      const isCompact = sellerCount > 3;
+                                      return (
+                                        <div 
+                                          key={idx} 
+                                          className={`inline-flex items-center gap-1 rounded-xl border border-blue-500/20 uppercase tracking-wider select-none shrink-0 text-blue-400 bg-blue-500/10 font-black transition-all ${
+                                            isCompact 
+                                              ? "h-6 text-[9px] md:text-[9.5px] px-2 py-0.5" 
+                                              : "h-7 text-[10px] md:text-[11px] px-2.5 py-0.5"
+                                          }`}
+                                        >
+                                          <User className={`${isCompact ? "w-3 h-3" : "w-3.5 h-3.5"} text-blue-400 shrink-0`} />
+                                          <span>
+                                            {seller.name || `Osoba ${idx + 1}`}: <strong className="text-slate-100 font-mono">{targetVal.toLocaleString("cs-CZ")} Kč/h</strong> ({seller.sharePct}%)
+                                          </span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -1096,6 +1173,108 @@ const App: React.FC = () => {
                       </div>
                     </div>
                   </div>
+
+                  {/* Rozdělení aktuálního cíle mezi členy týmu */}
+                  {sellerCount > 1 && (
+                    <div className="bg-slate-900 text-white rounded-[2.2rem] border border-slate-800 shadow-xl p-6 md:p-8 space-y-5 animate-in fade-in duration-300">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+                        <div className="flex items-center gap-3">
+                          <Users className="w-6 h-6 text-blue-400 animate-pulse" />
+                          <h3 className="text-sm md:text-base font-black uppercase tracking-widest text-slate-250">
+                            Rozdělení hodinových cílů mezi členy týmu ({sellerCount} osoby)
+                          </h3>
+                        </div>
+                        <button
+                          onClick={() => {
+                            const base = Math.floor(100 / sellerCount);
+                            const remainder = 100 % sellerCount;
+                            const resetSellers = sellers.map((s, k) => ({
+                              ...s,
+                              sharePct: base + (k < remainder ? 1 : 0)
+                            }));
+                            setSellers(resetSellers);
+                          }}
+                          className="px-4.5 py-2 bg-slate-800 hover:bg-slate-750 text-xs font-black rounded-xl border border-slate-705 text-slate-200 hover:text-blue-450 transition-all cursor-pointer shadow-md leading-none h-9 flex items-center shrink-0 self-start sm:self-auto"
+                        >
+                          Rovným dílem
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {sellers.slice(0, sellerCount).map((seller, idx) => {
+                          const targetVal = Math.round((nextTargetHourlySalesVal * seller.sharePct) / 100);
+                          return (
+                            <div key={idx} className="bg-slate-950/35 border border-slate-850 rounded-2xl p-4 flex flex-col justify-between space-y-3.5 shadow-inner">
+                              <div className="flex flex-col space-y-1.5">
+                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                  Pracovník #{idx + 1}
+                                </label>
+                                <input
+                                  type="text"
+                                  value={seller.name}
+                                  onChange={(e) => {
+                                    const newSellers = [...sellers];
+                                    newSellers[idx] = { ...newSellers[idx], name: e.target.value };
+                                    setSellers(newSellers);
+                                  }}
+                                  placeholder={`Osoba ${idx + 1}`}
+                                  className="w-full bg-slate-900/60 border border-slate-800 focus:border-blue-500 rounded-xl px-3 py-2 text-sm font-bold text-slate-200 focus:outline-none focus:ring-0 leading-none h-10"
+                                />
+                              </div>
+
+                              <div className="flex items-center justify-between gap-4 pt-1.5 border-t border-slate-900/40">
+                                <div className="flex flex-col space-y-1 flex-1">
+                                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                    Podíl (%)
+                                  </label>
+                                  <div className="relative flex items-center">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      max="100"
+                                      value={seller.sharePct}
+                                      onChange={(e) => {
+                                        const num = parseInt(e.target.value, 10);
+                                        const val = isNaN(num) ? 0 : num;
+                                        const newSellers = [...sellers];
+                                        newSellers[idx] = { ...newSellers[idx], sharePct: val };
+                                        setSellers(newSellers);
+                                      }}
+                                      className="w-full bg-slate-900/65 border border-slate-800 focus:border-blue-500 rounded-xl pl-3 pr-8 py-1.5 text-sm font-bold font-mono text-slate-200 focus:outline-none focus:ring-0 leading-none h-9"
+                                    />
+                                    <span className="absolute right-3 text-xs text-slate-500 font-bold select-none">%</span>
+                                  </div>
+                                </div>
+
+                                <div className="flex flex-col space-y-1 text-right shrink-0">
+                                  <span className="text-[10px] font-black text-slate-455 uppercase tracking-widest">
+                                    Hodinový cíl
+                                  </span>
+                                  <span className="font-mono text-sm font-black text-orange-400 h-9 flex items-center justify-end leading-none">
+                                    {targetVal.toLocaleString("cs-CZ")} Kč/h
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Verification message / warnings: if the sum doesn't equal 100% */}
+                      {(() => {
+                        const sum = sellers.slice(0, sellerCount).reduce((acc, s) => acc + s.sharePct, 0);
+                        if (sum !== 100) {
+                          return (
+                            <div className="text-xs font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-4 py-2.5 rounded-xl flex items-center gap-2">
+                              <Info className="w-4 h-4 text-amber-400 shrink-0" />
+                              <span>Součet podílů je aktuálně {sum}%. Pro správné rozdělení cílů musí být součet přesně 100%.</span>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
+                    </div>
+                  )}
 
                     {/* Interactive Chart visualizer */}
                     <SalesPerformanceChart blocks={processedBlocks} />
