@@ -1,0 +1,6 @@
+{
+  "name": "Služby - denní a hodinové plánování",
+  "description": "Sloučený přehled pro měsíční sledování plánování služeb a detailní hodinový plánovač tržeb pro dnešní směnu.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
