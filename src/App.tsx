@@ -57,7 +57,7 @@ const App: React.FC = () => {
   const [selectedBranch, setSelectedBranch] = useState<string>(() => {
     return localStorage.getItem("selectedBranch") || "";
   });
-  const [manualOverrides, setManualOverrides] = useState<Record<string, { serviceAsistRevenue?: number; revenueRR?: number }>>(() => {
+  const [manualOverrides, setManualOverrides] = useState<Record<string, { serviceAsistRevenue?: number; revenueRR?: number; planAsrServicesRevenue?: number }>>(() => {
     const saved = localStorage.getItem("manualOverrides");
     return saved ? JSON.parse(saved) : {};
   });
@@ -269,6 +269,7 @@ const App: React.FC = () => {
     const branchOverrides = manualOverrides[selectedBranch];
     const currentServiceAsist = branchOverrides?.serviceAsistRevenue ?? baseData.serviceAsistRevenue;
     const currentRevenueRR = branchOverrides?.revenueRR ?? baseData.revenueRR;
+    const currentPlanAsrServicesRevenue = branchOverrides?.planAsrServicesRevenue ?? baseData.planAsrServicesRevenue;
     
     const daysInfo = getRemainingDaysInfo();
     const weightedDays = daysInfo.weekdays + (weekendWeight * daysInfo.weekends);
@@ -280,7 +281,7 @@ const App: React.FC = () => {
       ? currentServiceAsist + totalSalesToday 
       : currentServiceAsist;
 
-    const remainingTotalRevenue = (currentRevenueRR * baseData.planAsrServicesRevenue) - activeServiceAsistRevenue;
+    const remainingTotalRevenue = (currentRevenueRR * currentPlanAsrServicesRevenue) - activeServiceAsistRevenue;
     const recalculatedFinalValue = weightedDays > 0 ? remainingTotalRevenue / weightedDays : 0;
 
     return {
@@ -288,6 +289,7 @@ const App: React.FC = () => {
       serviceAsistRevenue: currentServiceAsist, // base without today's live
       activeServiceAsistRevenue, // with today's live if toggled
       revenueRR: currentRevenueRR,
+      planAsrServicesRevenue: currentPlanAsrServicesRevenue,
       finalValue: recalculatedFinalValue
     };
   }, [allCalculations, selectedBranch, manualOverrides, weekendWeight, totalSalesToday, includeLiveSales]);
@@ -460,7 +462,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleUpdateOverride = (field: "serviceAsistRevenue" | "revenueRR", newValue: number) => {
+  const handleUpdateOverride = (field: "serviceAsistRevenue" | "revenueRR" | "planAsrServicesRevenue", newValue: number) => {
     if (!selectedBranch) return;
     setManualOverrides(prev => ({
       ...prev,
@@ -933,11 +935,26 @@ const App: React.FC = () => {
                           </div>
 
                           {/* Minimalist style line info displaying plan asr services to save space */}
-                          <div className="flex items-center justify-between text-xs text-slate-300 bg-slate-950/25 px-4 py-2 rounded-xl border border-slate-800/60 shadow-inner">
-                            <span className="font-bold uppercase tracking-wider">Plán služeb:</span>
-                            <span className="font-mono font-black text-slate-100">
-                              {(filteredResult.planAsrServicesRevenue * 105) > 100 ? "100" : (filteredResult.planAsrServicesRevenue * 100).toLocaleString("cs-CZ", { maximumFractionDigits: 1 })} %
-                            </span>
+                          <div className="flex items-center justify-between text-xs text-slate-300 bg-slate-950/25 px-4 py-1.5 rounded-xl border border-slate-800/60 shadow-inner hover:border-slate-700/80 transition-colors group/plan">
+                            <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-slate-400 select-none">
+                              <span>Plán služeb:</span>
+                              <PencilLine className="w-3.5 h-3.5 text-blue-400 opacity-40 group-hover/plan:opacity-100 transition-opacity" />
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="0.1"
+                                value={filteredResult.planAsrServicesRevenue === 0 ? "" : Number((filteredResult.planAsrServicesRevenue * 100).toFixed(2))}
+                                onChange={(e) => {
+                                  const num = parseFloat(e.target.value);
+                                  handleUpdateOverride("planAsrServicesRevenue", isNaN(num) ? 0 : num / 100);
+                                }}
+                                className="w-16 bg-transparent text-right p-0 font-mono font-black text-slate-100 border-[1.5px] border-transparent hover:border-slate-850 focus:border-blue-500 rounded px-1.5 py-0.5 focus:ring-0 focus:outline-none leading-none -mr-1"
+                              />
+                              <span className="font-bold text-slate-400 select-none">%</span>
+                            </div>
                           </div>
 
                           {/* Month Progress Bar (Highly visible yet compact design) */}
